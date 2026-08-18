@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExercisePicker } from "./exercise-picker";
 import { SaveTemplateDialog } from "./save-template-dialog";
 import { TemplatePicker } from "./template-picker";
@@ -57,16 +57,39 @@ export function WorkoutLogger({
   /** Set once this session has been saved as a template, to swap the button. */
   const [savedName, setSavedName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Ids of sets that are on screen but never reached the server. */
+  const [unsaved, setUnsaved] = useState<string[]>([]);
+  const [retrying, setRetrying] = useState(false);
 
   // Loading a template writes nothing to the database — it seeds these inputs
   // and lets you log each set as you actually do it.
   const [prefills, setPrefills] = useState<Map<string, Prefill>>(new Map());
+
+  // Walking back out of the dead spot by the squat rack should just fix it.
+  useEffect(() => {
+    if (unsaved.length === 0) return;
+    const onOnline = () => void retryAll();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  });
 
   const exerciseById = useMemo(() => {
     const m = new Map<string, Exercise>();
     for (const e of exercises) m.set(e.id, e);
     return m;
   }, [exercises]);
+
+  /**
+   * Writes one set. Because we mint the id, a retry is an upsert of the same
+   * row rather than a duplicate — so retrying a set that actually did land
+   * (server got it, response was lost) is harmless.
+   */
+  async function persist(row: SetEntry): Promise<boolean> {
+    const { error } = await supabase
+      .from("set_entries")
+      .upsert(row, { onConflict: "id" });
+    return !error;
+  }
 
   async function addSet(exerciseId: string, weight: number | null, reps: number) {
     const existing = sets.filter((s) => s.exercise_id === exerciseId);
@@ -88,22 +111,53 @@ export function WorkoutLogger({
     };
 
     setSets((prev) => [...prev, row]);
-    setError(null);
 
-    const { error } = await supabase.from("set_entries").insert(row);
-    if (error) {
-      setSets((prev) => prev.filter((s) => s.id !== row.id));
-      setError("Couldn't save that set. Check your connection.");
+    // A failed set stays on screen, flagged, instead of vanishing. Gym signal
+    // is exactly where this fails, and silently discarding the set you just
+    // did — with only a toast to say so — is how a session gets lost.
+    if (await persist(row)) {
+      setUnsaved((prev) => prev.filter((x) => x !== row.id));
+      router.refresh(); // the day now counts as a workout in the heatmap
     } else {
-      // The day now counts as a workout in the heatmap.
+      setUnsaved((prev) => [...prev, row.id]);
+    }
+  }
+
+  async function retry(id: string) {
+    const row = sets.find((s) => s.id === id);
+    if (!row || retrying) return;
+    setRetrying(true);
+    if (await persist(row)) {
+      setUnsaved((prev) => prev.filter((x) => x !== id));
       router.refresh();
     }
+    setRetrying(false);
+  }
+
+  async function retryAll() {
+    if (retrying) return;
+    setRetrying(true);
+    const landed: string[] = [];
+    for (const id of unsaved) {
+      const row = sets.find((s) => s.id === id);
+      if (row && (await persist(row))) landed.push(id);
+    }
+    if (landed.length > 0) {
+      setUnsaved((prev) => prev.filter((x) => !landed.includes(x)));
+      router.refresh();
+    }
+    setRetrying(false);
   }
 
   async function deleteSet(id: string) {
     const snapshot = sets;
+    const wasUnsaved = unsaved.includes(id);
     setSets((prev) => prev.filter((s) => s.id !== id));
+    setUnsaved((prev) => prev.filter((x) => x !== id));
     setError(null);
+
+    // Never reached the server, so there is nothing to delete there.
+    if (wasUnsaved) return;
 
     const { error } = await supabase.from("set_entries").delete().eq("id", id);
     if (error) {
@@ -197,6 +251,26 @@ export function WorkoutLogger({
         </p>
       )}
 
+      {unsaved.length > 0 && (
+        <div
+          role="alert"
+          className="mb-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3"
+        >
+          <span className="flex-1 text-sm text-amber-200">
+            {unsaved.length} {unsaved.length === 1 ? "set is" : "sets are"} not saved.
+            They are still here — retry when you have signal.
+          </span>
+          <button
+            type="button"
+            onClick={retryAll}
+            disabled={retrying}
+            className="min-h-11 shrink-0 rounded-lg bg-amber-500/20 px-3 text-sm font-medium text-amber-100 disabled:opacity-50"
+          >
+            {retrying ? "Retrying…" : "Retry all"}
+          </button>
+        </div>
+      )}
+
       <div className="space-y-3">
         {order.map((exerciseId) => {
           const exercise = exerciseById.get(exerciseId);
@@ -208,6 +282,8 @@ export function WorkoutLogger({
               sets={sets.filter((s) => s.exercise_id === exerciseId)}
               prefill={prefills.get(exerciseId)}
               unit={unit}
+              unsaved={unsaved}
+              onRetry={retry}
               onAddSet={(weight, reps) => addSet(exerciseId, weight, reps)}
               onDeleteSet={deleteSet}
             />
@@ -299,6 +375,8 @@ function ExerciseBlock({
   sets,
   prefill,
   unit,
+  unsaved,
+  onRetry,
   onAddSet,
   onDeleteSet,
 }: {
@@ -306,6 +384,8 @@ function ExerciseBlock({
   sets: SetEntry[];
   prefill: Prefill | undefined;
   unit: Unit;
+  unsaved: string[];
+  onRetry: (id: string) => void;
   onAddSet: (weight: number | null, reps: number) => void;
   onDeleteSet: (id: string) => void;
 }) {
@@ -360,18 +440,29 @@ function ExerciseBlock({
 
       {sets.length > 0 && (
         <ul className="mb-3">
-          {sets.map((s, i) => (
+          {sets.map((s, i) => {
+            const notSaved = unsaved.includes(s.id);
+            return (
             <li
               key={s.id}
               className="flex items-center justify-between gap-3 border-b border-line/60 py-2 last:border-b-0"
             >
               <span className="flex items-baseline gap-3">
                 <span className="w-5 text-sm tabular-nums text-fg-dim">{i + 1}</span>
-                <span className="tabular-nums">
+                <span className={`tabular-nums ${notSaved ? "text-amber-200" : ""}`}>
                   {s.weight_kg !== null
                     ? `${formatWeight(s.weight_kg, unit)} × ${s.reps}`
                     : `${s.reps} reps`}
                 </span>
+                {notSaved && (
+                  <button
+                    type="button"
+                    onClick={() => onRetry(s.id)}
+                    className="text-xs font-medium text-amber-300 underline underline-offset-2"
+                  >
+                    not saved · retry
+                  </button>
+                )}
               </span>
               <button
                 type="button"
@@ -389,7 +480,8 @@ function ExerciseBlock({
                 </svg>
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 
