@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.env
+.env.local
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# Working material — brand sources, mockups. Local only.
+ideas/

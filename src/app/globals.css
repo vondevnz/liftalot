@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Liftalot — dark only. There is no light theme and no prefers-color-scheme
+   branch; the accent carries the identity, so one surface ramp is enough.
+
+   These values are the brand palette verbatim (ideas/brand/README.md), so the
+   logo mark and the UI are the same oranges rather than nearly-the-same ones.
+   Changing one without the other will show as a seam wherever the mark sits
+   next to a heat cell or the accent. */
+@theme {
+  --color-bg: #0b0b0c;
+  --color-surface-1: #141516;
+  --color-surface-2: #1c1c1f;
+  --color-line: #2a2a2e;
+
+  --color-fg: #f5f5f4;
+  --color-fg-muted: #a1a1a6;
+  --color-fg-dim: #6e6e73;
+
+  --color-accent: #f87810;
+  --color-accent-hover: #ff9233;
+
+  /* Display face for the wordmark and page headings, loaded by next/font in
+     layout.tsx. Falls back to the system stack if the variable is missing, so
+     nothing renders in Times. */
+  --font-brand: var(--font-sora), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+
+  /* Activity ramp. On a near-black background "more activity" has to read as
+     brighter, so walk is the dimmest step and both is the brightest — the
+     inverse of how a GitHub-style grid works on white. */
+  --color-heat-1: #7d2f14; /* walk */
+  --color-heat-2: #ea5b0c; /* workout */
+  --color-heat-3: #f8b870; /* both */
+}
+
+html {
+  color-scheme: dark;
+  background: var(--color-bg);
+  /* Stop iOS inflating text in landscape. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  overscroll-behavior-y: none;
+}
+
+/* Number inputs: kill the spinners, they are useless on a phone and steal
+   width from an already narrow row. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
