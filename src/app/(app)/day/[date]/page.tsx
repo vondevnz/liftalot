@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { DayDetail } from "@/components/day-detail";
 import { createClient } from "@/lib/supabase/server";
+import { currentUserId } from "@/lib/supabase/user";
 import { toDateString } from "@/lib/date";
 import {
   summarize,
@@ -22,11 +23,9 @@ export default async function DayPage({
   // the shape we produce.
   if (!DATE_RE.test(date)) notFound();
 
+  const userId = await currentUserId();
+  if (!userId) redirect("/login");
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
   const [dayLog, workouts] = await Promise.all([
     supabase.from("day_logs").select("walked").eq("date", date).maybeSingle(),
@@ -39,7 +38,7 @@ export default async function DayPage({
 
   return (
     <DayDetail
-      userId={user.id}
+      userId={userId}
       date={date}
       serverToday={toDateString(new Date())}
       initialWalked={dayLog.data?.walked ?? false}

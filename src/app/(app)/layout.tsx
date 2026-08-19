@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { BottomNav } from "@/components/bottom-nav";
 import { createClient } from "@/lib/supabase/server";
+import { currentUserId } from "@/lib/supabase/user";
 import { UnitProvider } from "@/lib/unit-context";
 import { isUnit, type Unit } from "@/lib/units";
 
@@ -9,20 +10,19 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // The middleware already redirects unauthenticated requests; this is the
-  // belt to its braces, and it gives the pages below a guaranteed user.
+  // The id comes from the header middleware set after validating the session
+  // on this request — no second round trip to re-verify what was just verified.
+  const userId = await currentUserId();
+  if (!userId) redirect("/login");
+
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
   // No profile row until the setting is first changed, so a missing row is the
   // default rather than an error.
   const { data: profile } = await supabase
     .from("profiles")
     .select("unit")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
 
   const unit: Unit = isUnit(profile?.unit) ? profile.unit : "kg";

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ProgressList } from "@/components/progress-list";
 import { createClient } from "@/lib/supabase/server";
+import { currentUserId } from "@/lib/supabase/user";
 import {
   sortExercises,
   type ExerciseTotal,
@@ -11,11 +12,9 @@ import type { Exercise } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function ProgressPage() {
+  const userId = await currentUserId();
+  if (!userId) redirect("/login");
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
   const [totals, order, exercises] = await Promise.all([
     // Aggregated in Postgres by the exercise_totals view rather than by
@@ -49,7 +48,7 @@ export default async function ProgressPage() {
           Nothing logged yet. Tap + to start a workout.
         </p>
       ) : (
-        <ProgressList userId={user.id} initial={listed} />
+        <ProgressList userId={userId} initial={listed} />
       )}
     </main>
   );

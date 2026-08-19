@@ -11,6 +11,7 @@ import {
   type TotalWindow,
 } from "@/lib/total";
 import { createClient } from "@/lib/supabase/server";
+import { currentUserId } from "@/lib/supabase/user";
 import { addDays, toDateString } from "@/lib/date";
 import type { ActivityDay, Exercise } from "@/lib/types";
 import {
@@ -22,11 +23,9 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function TodayPage() {
+  const userId = await currentUserId();
+  if (!userId) redirect("/login");
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
   // The server's date is UTC and the viewer's may not be, so the range is
   // fetched with a couple of days of slack at each end and the client narrows
@@ -98,11 +97,11 @@ export default async function TodayPage() {
         </p>
       )}
 
-      <TodayView userId={user.id} serverToday={serverToday} initialDays={days} />
+      <TodayView userId={userId} serverToday={serverToday} initialDays={days} />
 
       <div className="mt-3">
         <TotalCard
-          userId={user.id}
+          userId={userId}
           candidates={candidates}
           initialSelected={selected}
           initialWindow={totalWindow}

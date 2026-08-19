@@ -9,14 +9,27 @@ import { supabaseAnonKey, supabaseUrl } from "./env";
 const PUBLIC_PATHS = ["/login", "/auth", "/reset-password"];
 
 /**
- * Refreshes the auth cookie on every request and guards the app routes.
+ * Carries the validated user id from middleware to the server components below.
  *
- * The response object has to be rebuilt after setAll so the refreshed cookies
- * actually reach the browser — dropping that step logs people out at random
- * once the access token expires.
+ * getUser() is a network call to Supabase on every invocation. Middleware has
+ * to make it — it is the only place that can verify the cookie rather than
+ * trust it — but the layout and pages then repeated it, so a single navigation
+ * cost three sequential auth round trips before touching any data. Passing the
+ * id down a request header makes it one.
  */
+export const USER_HEADER = "x-liftalot-user";
+export const EMAIL_HEADER = "x-liftalot-email";
+
 export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // Strip any inbound value first: a client could otherwise send this header
+  // itself and impersonate another user. Only middleware may set it.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.delete(USER_HEADER);
+  requestHeaders.delete(EMAIL_HEADER);
+
+  // Collected rather than applied immediately, so the response can be built
+  // once at the end with both the refreshed cookies and the added header.
+  const refreshed: { name: string; value: string; options: object }[] = [];
 
   const supabase = createServerClient(supabaseUrl(), supabaseAnonKey(), {
     cookies: {
@@ -27,10 +40,7 @@ export async function updateSession(request: NextRequest) {
         for (const { name, value } of cookiesToSet) {
           request.cookies.set(name, value);
         }
-        response = NextResponse.next({ request });
-        for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
-        }
+        refreshed.push(...cookiesToSet);
       },
     },
   });
@@ -46,17 +56,29 @@ export async function updateSession(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
 
+  function withCookies(response: NextResponse) {
+    for (const { name, value, options } of refreshed) {
+      response.cookies.set(name, value, options);
+    }
+    return response;
+  }
+
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return withCookies(NextResponse.redirect(url));
   }
 
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
-    return NextResponse.redirect(url);
+    return withCookies(NextResponse.redirect(url));
   }
 
-  return response;
+  if (user) {
+    requestHeaders.set(USER_HEADER, user.id);
+    if (user.email) requestHeaders.set(EMAIL_HEADER, user.email);
+  }
+
+  return withCookies(NextResponse.next({ request: { headers: requestHeaders } }));
 }

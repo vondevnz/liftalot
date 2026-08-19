@@ -2,21 +2,20 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { UnitSetting } from "@/components/unit-setting";
 import { createClient } from "@/lib/supabase/server";
+import { currentUserEmail, currentUserId } from "@/lib/supabase/user";
 import { isUnit, type Unit } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  const [userId, email] = await Promise.all([currentUserId(), currentUserEmail()]);
+  if (!userId) redirect("/login");
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("unit")
-    .eq("id", user.id)
+    .eq("id", userId)
     .maybeSingle();
 
   const unit: Unit = isUnit(profile?.unit) ? profile.unit : "kg";
@@ -26,7 +25,7 @@ export default async function SettingsPage() {
       <h1 className="font-brand mb-5 text-2xl font-semibold tracking-tight">Settings</h1>
 
       <div className="space-y-3">
-        <UnitSetting userId={user.id} initial={unit} />
+        <UnitSetting userId={userId} initial={unit} />
 
         <section className="rounded-2xl bg-surface-1 p-4">
           <h2 className="text-[15px] font-medium">Saved workouts</h2>
@@ -43,7 +42,7 @@ export default async function SettingsPage() {
 
         <section className="rounded-2xl bg-surface-1 p-4">
           <h2 className="text-[15px] font-medium">Account</h2>
-          <p className="mt-1 text-sm text-fg-muted">{user.email}</p>
+          <p className="mt-1 text-sm text-fg-muted">{email ?? "Signed in"}</p>
           <form action="/auth/signout" method="post">
             <button
               type="submit"
