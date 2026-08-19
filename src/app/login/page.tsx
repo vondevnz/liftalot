@@ -1,32 +1,84 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Mark } from "@/components/logo";
 import { createClient } from "@/lib/supabase/client";
 
+type Mode = "password" | "link";
+
+/**
+ * Password first, magic link second.
+ *
+ * The link is the nicer flow but it depends on an inbox reaching you, and
+ * Supabase's built-in email service is rate-limited to a handful an hour — a
+ * bad thing to discover while standing at a squat rack. Password sign-in keeps
+ * email off the critical path.
+ */
 export default function LoginPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"idle" | "working" | "sent">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
+  /** Supabase's raw messages are terse; these are the ones worth translating. */
+  function explain(message: string): string {
+    const m = message.toLowerCase();
+    if (m.includes("rate limit") || m.includes("too many"))
+      return "Too many attempts. Supabase limits sign-in emails to a few per hour — wait a while, or use a password.";
+    if (m.includes("invalid login credentials"))
+      return "That email and password don't match an account.";
+    if (m.includes("email not confirmed"))
+      return "That account hasn't been confirmed yet. Confirm it, or turn off email confirmation in Supabase.";
+    return message;
+  }
+
+  async function signInWithPassword(e: React.FormEvent) {
     e.preventDefault();
-    setStatus("sending");
+    setStatus("working");
+    setError(null);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      setError(explain(error.message));
+      setStatus("idle");
+      return;
+    }
+    // refresh() so the server components re-run and see the new session cookie.
+    router.push("/");
+    router.refresh();
+  }
+
+  async function sendLink(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("working");
     setError(null);
 
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
+      // Derived from wherever the app is actually running, so the same build
+      // works on localhost and on the deployed URL.
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
 
     if (error) {
-      setError(error.message);
+      setError(explain(error.message));
       setStatus("idle");
     } else {
       setStatus("sent");
     }
   }
+
+  const inputClass =
+    "h-13 w-full rounded-xl border border-line bg-surface-1 px-4 text-base text-fg outline-none placeholder:text-fg-dim focus:border-accent";
 
   return (
     <main className="flex min-h-dvh flex-col justify-center px-6 py-12">
@@ -45,13 +97,16 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setStatus("idle")}
-              className="mt-4 text-sm text-accent"
+              className="mt-4 min-h-11 text-sm text-accent"
             >
-              Use a different email
+              Back
             </button>
           </div>
         ) : (
-          <form onSubmit={onSubmit} className="mt-10 space-y-3">
+          <form
+            onSubmit={mode === "password" ? signInWithPassword : sendLink}
+            className="mt-10 space-y-3"
+          >
             <label htmlFor="email" className="sr-only">
               Email address
             </label>
@@ -64,19 +119,65 @@ export default function LoginPage() {
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="h-13 w-full rounded-xl border border-line bg-surface-1 px-4 text-base text-fg outline-none placeholder:text-fg-dim focus:border-accent"
+              className={inputClass}
             />
+
+            {mode === "password" && (
+              <>
+                <label htmlFor="password" className="sr-only">
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  /* current-password so iOS and Android offer the saved one
+                     rather than proposing a new password. */
+                  autoComplete="current-password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClass}
+                />
+              </>
+            )}
+
             <button
               type="submit"
-              disabled={status === "sending" || email.trim() === ""}
+              disabled={
+                status === "working" ||
+                email.trim() === "" ||
+                (mode === "password" && password === "")
+              }
               className="h-13 w-full rounded-xl bg-accent text-base font-semibold text-black transition-colors active:bg-accent-hover disabled:opacity-40"
             >
-              {status === "sending" ? "Sending…" : "Send sign-in link"}
+              {status === "working"
+                ? mode === "password"
+                  ? "Signing in…"
+                  : "Sending…"
+                : mode === "password"
+                  ? "Sign in"
+                  : "Send sign-in link"}
             </button>
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <p className="pt-1 text-center text-xs text-fg-dim">
-              No password. We email you a link.
-            </p>
+
+            {error && (
+              <p role="alert" className="text-sm text-red-400">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === "password" ? "link" : "password");
+                setError(null);
+              }}
+              className="min-h-11 w-full text-center text-sm text-fg-muted"
+            >
+              {mode === "password"
+                ? "Email me a sign-in link instead"
+                : "Use a password instead"}
+            </button>
           </form>
         )}
       </div>
