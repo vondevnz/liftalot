@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Mark } from "@/components/logo";
 import { createClient } from "@/lib/supabase/client";
 
-type Mode = "signin" | "signup" | "link";
+type Mode = "signin" | "signup" | "link" | "forgot";
 
 /** Supabase's own default. Anything shorter is rejected server-side. */
 const MIN_PASSWORD = 6;
@@ -14,6 +14,7 @@ const COPY: Record<Mode, { action: string; working: string }> = {
   signin: { action: "Sign in", working: "Signing in…" },
   signup: { action: "Create account", working: "Creating…" },
   link: { action: "Send sign-in link", working: "Sending…" },
+  forgot: { action: "Send reset link", working: "Sending…" },
 };
 
 /**
@@ -28,7 +29,9 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [status, setStatus] = useState<"idle" | "working" | "sent" | "confirm">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "working" | "sent" | "confirm" | "reset"
+  >("idle");
   const [error, setError] = useState<string | null>(null);
 
   /** Supabase's raw messages are terse; these are the ones worth translating. */
@@ -58,6 +61,21 @@ export default function LoginPage() {
     setStatus("working");
     setError(null);
     const supabase = createClient();
+
+    if (mode === "forgot") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        // Through the callback so the recovery token is exchanged for a session
+        // before the form that uses it renders.
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+      });
+      if (error) {
+        setError(explain(error.message));
+        setStatus("idle");
+      } else {
+        setStatus("reset");
+      }
+      return;
+    }
 
     if (mode === "link") {
       const { error } = await supabase.auth.signInWithOtp({
@@ -134,13 +152,15 @@ export default function LoginPage() {
         <h1 className="font-brand mt-4 text-3xl font-bold tracking-[-0.04em]">Liftalot</h1>
         <p className="mt-2 text-fg-muted">Move every day. Lift when you can.</p>
 
-        {status === "sent" || status === "confirm" ? (
+        {status === "sent" || status === "confirm" || status === "reset" ? (
           <div className="mt-10 rounded-2xl bg-surface-1 p-5">
             <p className="font-medium">Check your email</p>
             <p className="mt-1 text-sm text-fg-muted">
               {status === "sent"
                 ? `We sent a sign-in link to ${email}. Open it on this device.`
-                : `We sent a confirmation link to ${email}. Open it to finish creating your account.`}
+                : status === "reset"
+                  ? `We sent a reset link to ${email}. Open it on this device to choose a new password.`
+                  : `We sent a confirmation link to ${email}. Open it to finish creating your account.`}
             </p>
             <button
               type="button"
@@ -167,7 +187,7 @@ export default function LoginPage() {
               className={inputClass}
             />
 
-            {mode !== "link" && (
+            {(mode === "signin" || mode === "signup") && (
               <>
                 <label htmlFor="password" className="sr-only">
                   Password
@@ -196,7 +216,7 @@ export default function LoginPage() {
               disabled={
                 status === "working" ||
                 email.trim() === "" ||
-                (mode !== "link" && password === "")
+                ((mode === "signin" || mode === "signup") && password === "")
               }
               className="h-13 w-full rounded-xl bg-accent text-base font-semibold text-black transition-colors active:bg-accent-hover disabled:opacity-40"
             >
@@ -234,6 +254,30 @@ export default function LoginPage() {
                   ? "Use a password instead"
                   : "Email me a sign-in link instead"}
               </button>
+              {mode === "signin" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("forgot");
+                    setError(null);
+                  }}
+                  className="min-h-11 text-sm text-fg-dim"
+                >
+                  Forgot password?
+                </button>
+              )}
+              {mode === "forgot" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("signin");
+                    setError(null);
+                  }}
+                  className="min-h-11 text-sm text-fg-dim"
+                >
+                  Back to sign in
+                </button>
+              )}
             </div>
           </form>
         )}
