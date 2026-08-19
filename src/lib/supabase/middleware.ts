@@ -6,7 +6,7 @@ import { supabaseAnonKey, supabaseUrl } from "./env";
 // itself. Guarding it would redirect to /login before the client had a chance
 // to process a link that arrives as a hash fragment rather than a query param.
 // Nothing is exposed by letting it render: updateUser fails without a session.
-const PUBLIC_PATHS = ["/login", "/auth", "/reset-password"];
+const PUBLIC_PATHS = ["/login", "/auth", "/reset-password", "/welcome"];
 
 /**
  * Carries the validated user id from middleware to the server components below.

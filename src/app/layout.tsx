@@ -18,7 +18,18 @@ const sora = Sora({
   display: "swap",
 });
 
+/**
+ * Absolute base for Open Graph images. Vercel exposes the production domain at
+ * build time; without this, share previews point at localhost.
+ */
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "http://localhost:3000");
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Liftalot",
   description: "A lift tracker that rewards moving every day.",
   applicationName: "Liftalot",
